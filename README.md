@@ -1,2 +1,5 @@
 # Capital Conversion, Debt and Interconnectivity: A formal Approach to the Origin of Inequality among Nomadic Herders in the Xiongnu Empire
 The repository contains the NetLogo script to run the AMB used in the paper "Capital Conversion, Debt and Interconnectivity: A formal Approach to the Origin of Inequality among Nomadic Herders in the Xiongnu Empire". 
+
+## Abstract
+The cemeteries of the Xiongnu empire reveal marked inequality, passed down within élite lineages across several generations. Yet herd wealth is volatile, and scholars disagree on whether durable hierarchy could arise within steppe society or required external resources and coercion. Building on Miller’s (2024) account of the Xiongnu political economy, this paper asks whether debt, that is, the conversion of livestock into social obligations through herd-sharing contracts, could by itself generate lasting inequality, and how access to external resources through interconnectivity networks changes the outcome. These questions are addressed through an Agent-Based Model (ABM) of herding households built in NetLogo.
