@@ -3,10 +3,10 @@ The repository contains the supplementary materials for the paper "Capital Conve
 
 #### Appendix 1: Algorithm Description
 
-### Appendix 2: NetLogo Code
+#### Appendix 2: NetLogo Code
 
-### Appendix 3: Sensitivity Analysis
+#### Appendix 3: Sensitivity Analysis
 
-### Appendix 4: R Scripts
+#### Appendix 4: R Scripts
 
 ## Abstract
