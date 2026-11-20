@@ -6,7 +6,7 @@ The cemeteries of the Xiongnu empire reveal marked and persistent inequality. Ye
 
 **Keywords:** Agent-Based Modeling, ABM, Xiongnu, Inequality, Nomadic Pastoralists, Eurasia.
 
-### Data
+### Files
 - **Simulation Raw Output** → Raw data produced by NetLogo simulations (see Appendix 2: NetLogo Code);
 - **Appendix 1: Hypotheses, Scenarios and Variables** → Synthesis of the hypotheses, scenarios and variables used in the simulations;
 - **Appendix 2: Algorithm Description** → General description of the algorithm used in the different scenarios simulated;
