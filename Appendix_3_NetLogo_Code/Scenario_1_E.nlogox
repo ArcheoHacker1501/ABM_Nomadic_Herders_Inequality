@@ -1,0 +1,1816 @@
+<?xml version="1.0" encoding="utf-8"?>
+<model version="NetLogo 7.0.4" snapToGrid="true">
+  <code><![CDATA[;; ============================================================================
+;; Capital Conversion, Debt and Interconnectivity: A Formal Approach to
+;; Inequality among Nomadic Herders in Ancient Eurasia
+;; Agent-based model. Scenario 1+E (S1+E): gifts to households in need, with
+;; external resources. Tests H4 (interconnectivity), compared with
+;; Scenario 1; reference for Scenario 3+E.
+;; ============================================================================
+
+globals [
+  ;; parameters (default values in set-parameters)
+  number-of-households       ; households at the start
+  initial-herd               ; animals of each household at the start
+  carrying-capacity          ; total animals that the pastures can support
+  growth-rate                ; yearly growth of each herd
+  individual-disaster-rate   ; yearly probability of an individual disaster
+  general-disaster-rate      ; yearly probability of a general disaster
+  general-disaster-hit       ; probability that a general disaster strikes a household
+  loss-rate                  ; share of the herd lost in a disaster
+  dissolution-threshold      ; below this herd a household that no patron can help dissolves
+  poverty-threshold          ; below this herd a household asks for help
+  help-threshold             ; herd that a household must keep after giving or lending animals
+  patron-threshold           ; herd below which a patron loses his status
+  fixed-transfer             ; 0 = only the animals needed; otherwise at least this number of head
+  patron-choice              ; "random" or "richest"
+  inflow-level               ; yearly inflow of external goods, as a share of the carrying capacity
+  channel                    ; "top", "frontier" or "diffuse"
+  max-years                  ; length of a run
+  warm-up                    ; first years excluded from the run measures
+  fixed-seed                 ; 0 = a new random seed at every setup
+  ;; state of the run
+  run-seed                   ; random seed of the current run
+  current-patrons            ; households with at least one active client
+  crisis-patrons             ; patrons at the time of this year's general disaster
+  ;; measures, recorded over the years after the warm-up (see the reporters)
+  years-measured
+  gini-wealth-sum            ; Gini of total wealth, summed over the years
+  gini-herds-sum             ; Gini of the herds kept, summed over the years
+  gini-first-sum             ; Gini of total wealth in the first 500 years after the warm-up
+  gini-first-years
+  gini-last-sum              ; Gini of total wealth in the last 500 years of the run
+  gini-last-years
+  gini-peak                  ; highest yearly Gini of total wealth, and its year
+  gini-peak-year
+  half-gone-year             ; year in which half of the households had disappeared (-1 = never)
+  top-wealth-history         ; richest 10% by total wealth in each of the last 25 years
+  top-herds-history          ; the same, by herd kept
+  top-wealth-sizes           ; size of the richest 10% in every year, by total wealth
+  top-herds-sizes            ; the same, by herd kept
+  retention-wealth           ; shares of the richest 10% still among them after 25 years
+  retention-herds
+  continuity-wealth          ; shares of the richest 10% among them without interruption for 200 years
+  continuity-herds
+  networks-sum               ; number of networks, summed over the years
+  largest-network-sum        ; clients of the largest network, summed over the years
+  network-size-sum           ; mean network size, summed over the years with networks
+  network-years              ; years with at least one network
+  patron-spells              ; durations of the networks, completed or open at the end
+  open-spells                ; networks still active at the end of the run
+  contract-lengths           ; durations of the relationships that ended
+  exits-forced-change        ; relationships ended because the client found a new patron
+  exits-status-loss          ; relationships ended because the patron lost his status
+  exits-dissolution          ; relationships ended because the client dissolved
+  returns-to-dependence      ; former clients that found a patron again
+  crisis-survival            ; shares of the crisis patrons still patrons at the end of the year
+  herd-change-sum            ; yearly relative changes of the direct herd of the patrons
+  wealth-change-sum          ; yearly relative changes of the total wealth of the patrons
+  change-count
+  dissolved-households
+  losses                     ; animals lost in disasters, net of any replacement
+  herds-struck               ; herds of the households struck, before the disaster
+  recipient-losses           ; the same for the recipients of external goods
+  recipient-herds-struck
+  other-losses               ; and for the other households
+  other-herds-struck
+]
+
+turtles-own [
+  herd                ; animals of the household
+  my-patron           ; the patron of the household, or nobody
+  contract-start      ; year in which the current relationship began
+  former-client?      ; true if the household has already been a client
+  patron-spell        ; consecutive years with at least one active client
+  previous-herd       ; direct herd at the end of last year, if then a patron (else 0)
+  previous-wealth     ; total wealth at the end of last year, if then a patron (else 0)
+  consumables         ; external goods usable only in the year they arrive
+  frontier?           ; true for the quarter of frontier households
+  recipient?          ; true if the household received goods this year
+  top-spell-wealth    ; consecutive years in the richest 10% by total wealth
+  top-spell-herds     ; consecutive years in the richest 10% by herd kept
+]
+
+;; ---------------------------------------------------------------------- setup
+
+to set-defaults
+  ;; gives every parameter its default value
+  set-parameters true
+end
+
+to set-parameters [ reset-all? ]
+  ;; default values of the parameters. With reset-all? false, as in setup,
+  ;; only the parameters still equal to 0 (never set) take their default
+  ;; value, so a value given before setup in the Command Center or in
+  ;; BehaviorSpace is kept. A parameter that must be 0 cannot be given before
+  ;; setup: set it after setup (for example "setup set general-disaster-rate 0")
+  set number-of-households chosen-value reset-all? number-of-households 100
+  set initial-herd chosen-value reset-all? initial-herd 60
+  ;; 10,000 and 50,000 in the sensitivity analysis
+  set carrying-capacity chosen-value reset-all? carrying-capacity 25000
+  set growth-rate chosen-value reset-all? growth-rate 0.10
+  ;; 0.10 in the experiment with external resources
+  set individual-disaster-rate chosen-value reset-all? individual-disaster-rate 0.10
+  set general-disaster-rate chosen-value reset-all? general-disaster-rate 0.10
+  set general-disaster-hit chosen-value reset-all? general-disaster-hit 0.40
+  set loss-rate chosen-value reset-all? loss-rate 0.50
+  set dissolution-threshold chosen-value reset-all? dissolution-threshold 2
+  set poverty-threshold chosen-value reset-all? poverty-threshold 60
+  set patron-threshold chosen-value reset-all? patron-threshold 500
+  ;; never below patron-threshold
+  set help-threshold chosen-value reset-all? help-threshold 500
+  ;; 0 = the animals needed to get back to the poverty threshold
+  set fixed-transfer chosen-value reset-all? fixed-transfer 0
+  ;; "random" or "richest"
+  set patron-choice chosen-value reset-all? patron-choice "random"
+  if not member? patron-choice ["random" "richest"] [ error "patron-choice must be random or richest" ]
+  if help-threshold < patron-threshold [ error "help-threshold must not be below patron-threshold" ]
+  ;; 0.015, 0.03 or 0.06 of the carrying capacity per year
+  set inflow-level chosen-value reset-all? inflow-level 0.03
+  ;; "top", "frontier" or "diffuse"
+  set channel chosen-value reset-all? channel "top"
+  if not member? channel ["top" "frontier" "diffuse"] [ error "channel must be top, frontier or diffuse" ]
+  set max-years chosen-value reset-all? max-years 2000
+  set warm-up chosen-value reset-all? warm-up 300
+  set fixed-seed chosen-value reset-all? fixed-seed 0
+end
+
+to-report chosen-value [ reset-all? current-value default-value ]
+  report ifelse-value (reset-all? or current-value = 0) [ default-value ] [ current-value ]
+end
+
+to setup
+  ;; the parameters are not cleared, so that values chosen before setup are kept
+  clear-turtles
+  clear-patches
+  clear-drawing
+  clear-all-plots
+  clear-output
+  set-parameters false
+  reset-measures
+  ifelse fixed-seed = 0 [ set run-seed new-seed ] [ set run-seed fixed-seed ]
+  random-seed run-seed
+  create-turtles number-of-households [
+    setxy random-xcor random-ycor
+    set shape "circle"
+    set herd initial-herd
+    set my-patron nobody
+    set contract-start 0
+    set former-client? false
+    set patron-spell 0
+    set previous-herd 0
+    set previous-wealth 0
+    set consumables 0
+    set frontier? false
+    set recipient? false
+    set top-spell-wealth 0
+    set top-spell-herds 0
+  ]
+  ;; the frontier households are a quarter of all households, drawn once
+  ask n-of (round (number-of-households / 4)) turtles [ set frontier? true ]
+  update-display
+  reset-ticks
+end
+
+to reset-measures
+  set current-patrons no-turtles
+  set crisis-patrons no-turtles
+  set years-measured 0
+  set gini-wealth-sum 0
+  set gini-herds-sum 0
+  set gini-first-sum 0
+  set gini-first-years 0
+  set gini-last-sum 0
+  set gini-last-years 0
+  set gini-peak 0
+  set gini-peak-year 0
+  set half-gone-year -1
+  set top-wealth-history []
+  set top-herds-history []
+  set top-wealth-sizes []
+  set top-herds-sizes []
+  set retention-wealth []
+  set retention-herds []
+  set continuity-wealth []
+  set continuity-herds []
+  set networks-sum 0
+  set largest-network-sum 0
+  set network-size-sum 0
+  set network-years 0
+  set patron-spells []
+  set open-spells 0
+  set contract-lengths []
+  set exits-forced-change 0
+  set exits-status-loss 0
+  set exits-dissolution 0
+  set returns-to-dependence 0
+  set crisis-survival []
+  set herd-change-sum 0
+  set wealth-change-sum 0
+  set change-count 0
+  set dissolved-households 0
+  set losses 0
+  set herds-struck 0
+  set recipient-losses 0
+  set recipient-herds-struck 0
+  set other-losses 0
+  set other-herds-struck 0
+end
+
+;; ------------------------------------------------------------------- one year
+
+to go
+  if (ticks >= max-years) or (not any? turtles) [ stop ]
+  ;; the operations of one year, numbered as in Appendix 2 (this scenario
+  ;; has only those of its own mechanisms); within each of them households
+  ;; act one at a time, in random order
+  receive-external-goods  ; 1. external goods arrive
+  grow-herds              ; 2. growth
+  disasters               ; 4. individual and general disasters, and replacement with external goods
+  check-patrons           ; 5. loss of patron status
+  seek-help               ; 6. households below 60 animals look for help
+  dissolve                ; 7. households below 2 animals that no patron can help dissolve
+  check-consistency       ; internal checks: an error stops the run if the bookkeeping breaks
+  tick
+  update-measures         ; 8. the measures of the year
+  update-display
+end
+
+to run-simulation
+  setup
+  repeat max-years [ go ]
+end
+
+to receive-external-goods
+  ;; the yearly inflow, in head of livestock, is a share of the carrying
+  ;; capacity, divided in equal shares among the recipients of the channel:
+  ;; the richest 10% of the year by total wealth (top), the frontier
+  ;; households still present (frontier) or all households (diffuse)
+  ask turtles [
+    set consumables 0          ; consumables not used in the previous year are lost
+    set recipient? false
+  ]
+  let recipients no-turtles
+  if channel = "top" [ set recipients richest-tenth-by-wealth ]
+  if channel = "frontier" [ set recipients turtles with [ frontier? ] ]
+  if channel = "diffuse" [ set recipients turtles ]
+  if any? recipients [
+    let portion (inflow-level * carrying-capacity) / (count recipients)
+    ask recipients [
+      set recipient? true
+      set consumables consumables + portion
+    ]
+  ]
+end
+
+to grow-herds
+  ;; as in Shultz and Costopoulos (2019: 3, 10), households grow one at a time,
+  ;; in random order, while the total livestock does not exceed the carrying
+  ;; capacity
+  let livestock-now sum [herd] of turtles
+  ask turtles [
+    if livestock-now <= carrying-capacity [
+      let increase herd * growth-rate
+      set herd herd + increase
+      set livestock-now livestock-now + increase
+    ]
+  ]
+end
+
+to disasters
+  ;; every household may suffer an individual disaster; in a year of general
+  ;; disaster each household is struck with probability general-disaster-hit;
+  ;; a disaster halves the herd, and a household struck by both loses half of
+  ;; its herd twice, that is, three quarters
+  let general-disaster? random-float 1 < general-disaster-rate
+  ;; the patrons at the time of a general disaster (for the crisis measure)
+  set crisis-patrons no-turtles
+  if general-disaster? [ set crisis-patrons turtles with [ any? my-clients ] ]
+  ask turtles [
+    let hits 0
+    if random-float 1 < individual-disaster-rate [ set hits hits + 1 ]
+    if general-disaster? and random-float 1 < general-disaster-hit [ set hits hits + 1 ]
+    if hits > 0 [
+      let herd-before herd
+      let kept (1 - loss-rate) ^ hits
+      set herd herd * kept
+      ;; the goods replace the animals just lost
+      replace-losses (herd-before - herd)
+      record-losses herd-before
+    ]
+  ]
+end
+
+to replace-losses [ lost ]
+  ;; the external goods replace the animals just lost, at most up to the level
+  ;; before the disaster
+  let from-consumables min (list consumables lost)
+  set consumables consumables - from-consumables
+  set herd herd + from-consumables
+end
+
+to record-losses [ herd-before ]
+  ;; losses net of replacement, for all households and separately for the
+  ;; recipients of external goods and for the other households
+  if ticks >= warm-up [
+    set losses losses + herd-before - herd
+    set herds-struck herds-struck + herd-before
+    ifelse recipient? [
+      set recipient-losses recipient-losses + herd-before - herd
+      set recipient-herds-struck recipient-herds-struck + herd-before
+    ] [
+      set other-losses other-losses + herd-before - herd
+      set other-herds-struck other-herds-struck + herd-before
+    ]
+  ]
+end
+
+to check-patrons
+  ;; a patron whose herd falls below the patron threshold loses his status
+  ;; and all his clients at once, as in Shultz and Costopoulos (2019: 6)
+  ask turtle-set [my-patron] of turtles with [ my-patron != nobody ] [
+    if herd < patron-threshold [
+      ask my-clients [ end-relationship "status loss" ]
+    ]
+  ]
+end
+
+to seek-help
+  ;; a household below the poverty threshold asks its patron, if it has one,
+  ;; for the animals it needs to get back to the threshold; if the patron
+  ;; cannot give them and still keep the help threshold, or if the household
+  ;; has no patron, it looks for one among the households that can, chosen at
+  ;; random (or the richest of them, in the sensitivity analysis). A client
+  ;; that finds one leaves its old patron, while one that finds
+  ;; none stays with him, as in the code of Shultz and Costopoulos. No
+  ;; household can become the patron of its own patron
+  ask turtles with [ herd < poverty-threshold ] [
+    let old-patron my-patron
+    let helped? false
+    if old-patron != nobody [
+      let amount transfer-amount herd
+      if ([herd] of old-patron) - amount >= help-threshold [
+        receive-gift old-patron amount
+        set helped? true
+      ]
+    ]
+    if not helped? [
+      let herd-after herd
+      let amount transfer-amount herd-after
+      let candidates other turtles with [
+        self != old-patron and my-patron != myself and herd - amount >= help-threshold ]
+      if any? candidates [
+        ifelse old-patron != nobody [
+          end-relationship "forced change"
+        ] [
+          if former-client? and ticks >= warm-up [
+            set returns-to-dependence returns-to-dependence + 1
+          ]
+        ]
+        set my-patron choose-patron candidates
+        set contract-start ticks
+        receive-gift my-patron amount
+      ]
+    ]
+  ]
+end
+
+to-report transfer-amount [ current-herd ]
+  ;; the animals needed to bring the herd back to the poverty threshold, or a
+  ;; fixed number of head (sensitivity analysis), if larger
+  report max (list fixed-transfer (poverty-threshold - current-herd))
+end
+
+to-report choose-patron [ candidates ]
+  ;; one of the households that can help, at random, or the richest of them by
+  ;; total wealth (sensitivity analysis)
+  if patron-choice = "richest" [ report max-one-of candidates [ wealth ] ]
+  report one-of candidates
+end
+
+to receive-gift [ giver amount ]
+  ;; a gift creates no obligation and brings the patron no gain
+  ask giver [ set herd herd - amount ]
+  set herd herd + amount
+end
+
+to end-relationship [ reason ]
+  ;; the client leaves its patron; the measures record why and after how long
+  if ticks >= warm-up [
+    if reason = "forced change" [ set exits-forced-change exits-forced-change + 1 ]
+    if reason = "status loss" [ set exits-status-loss exits-status-loss + 1 ]
+    if reason = "dissolution" [ set exits-dissolution exits-dissolution + 1 ]
+    set contract-lengths lput (ticks - contract-start) contract-lengths
+  ]
+  set my-patron nobody
+  set former-client? true
+end
+
+to dissolve
+  ;; a household still below the dissolution threshold after seek-help is one
+  ;; that no patron can help: it dissolves and is removed from the simulation,
+  ;; together with its animals, even if it still has a patron
+  ask turtles with [ herd < dissolution-threshold ] [
+    if any? my-clients [ error "a patron cannot dissolve" ]
+    if my-patron != nobody [ end-relationship "dissolution" ]
+    if ticks >= warm-up [
+      ;; a former patron that lost his status this year closes his network
+      if patron-spell > 0 [ set patron-spells lput patron-spell patron-spells ]
+      set dissolved-households dissolved-households + 1
+    ]
+    die
+  ]
+end
+
+to check-consistency
+  ;; internal checks of the bookkeeping, at the end of every year
+  if any? turtles with [ herd < -0.000001 ] [ error "a herd is negative" ]
+  if any? turtles with [ my-patron != nobody and [my-patron] of my-patron = self ] [
+    error "a household is the patron of its own patron"
+  ]
+  if any? (turtle-set [my-patron] of turtles with [ my-patron != nobody ]) with [ herd < patron-threshold - 0.000001 ] [
+    error "a patron is below the patron threshold"
+  ]
+end
+
+;; ------------------------------------------------------------------- measures
+
+to update-measures
+  ;; after tick: ticks is the number of the year just ended. The run measures
+  ;; use the years after the warm-up (in S0 and S0+E, all years)
+  ;; households remaining: the year in which half of them had disappeared
+  if half-gone-year < 0 and count turtles <= number-of-households / 2 [ set half-gone-year ticks ]
+  if not any? turtles [ stop ]
+  let counted? ticks > warm-up
+  set current-patrons turtle-set [my-patron] of turtles with [ my-patron != nobody ]
+  ;; economic inequality: Gini of total wealth and of the herds kept
+  if counted? [
+    let g gini [wealth] of turtles
+    set years-measured years-measured + 1
+    set gini-wealth-sum gini-wealth-sum + g
+    set gini-herds-sum gini-herds-sum + gini [herd] of turtles
+    if g > gini-peak [
+      set gini-peak g
+      set gini-peak-year ticks
+    ]
+    if ticks <= warm-up + 500 [
+      set gini-first-sum gini-first-sum + g
+      set gini-first-years gini-first-years + 1
+    ]
+    if ticks > max-years - 500 [
+      set gini-last-sum gini-last-sum + g
+      set gini-last-years gini-last-years + 1
+    ]
+  ]
+  update-persistence
+  update-networks counted?
+  if ticks = max-years [ finish-networks ]
+end
+
+to update-persistence
+  ;; persistence: share of the richest 10% still among them after 25 years, one
+  ;; generation, and share that remain among them without interruption for
+  ;; 200 years, by total wealth and, for comparison, by herd kept
+  let top-wealth richest-tenth-by-wealth
+  let top-herds richest-tenth-by-herd
+  ask turtles [
+    set top-spell-wealth ifelse-value (member? self top-wealth) [ top-spell-wealth + 1 ] [ 0 ]
+    set top-spell-herds ifelse-value (member? self top-herds) [ top-spell-herds + 1 ] [ 0 ]
+  ]
+  set top-wealth-sizes lput (count top-wealth) top-wealth-sizes
+  set top-herds-sizes lput (count top-herds) top-herds-sizes
+  ;; 25 years: the histories keep the last 25 sets, so that the set of 25
+  ;; years ago is at place (ticks - 1) mod 25; households that dissolved since
+  ;; are no longer in it, but the size of the set is kept apart
+  ifelse length top-wealth-history < 25 [
+    set top-wealth-history lput top-wealth top-wealth-history
+    set top-herds-history lput top-herds top-herds-history
+  ] [
+    let k (ticks - 1) mod 25
+    if ticks - 25 > warm-up [
+      let kept-wealth count (item k top-wealth-history) with [ member? self top-wealth ]
+      set retention-wealth lput (kept-wealth / (item (ticks - 26) top-wealth-sizes)) retention-wealth
+      let kept-herds count (item k top-herds-history) with [ member? self top-herds ]
+      set retention-herds lput (kept-herds / (item (ticks - 26) top-herds-sizes)) retention-herds
+    ]
+    set top-wealth-history replace-item k top-wealth-history top-wealth
+    set top-herds-history replace-item k top-herds-history top-herds
+  ]
+  ;; 200 years: a household in the richest 10% for at least 200 years running
+  ;; has been among them in every year since the year 199 years ago
+  if ticks - 199 > warm-up [
+    let base ticks - 199
+    set continuity-wealth lput ((count top-wealth with [ top-spell-wealth >= 200 ]) / (item (base - 1) top-wealth-sizes)) continuity-wealth
+    set continuity-herds lput ((count top-herds with [ top-spell-herds >= 200 ]) / (item (base - 1) top-herds-sizes)) continuity-herds
+  ]
+end
+
+to update-networks [ counted? ]
+  ;; network duration: consecutive years with at least one active client
+  ask turtles [
+    ifelse member? self current-patrons [
+      set patron-spell patron-spell + 1
+    ] [
+      if patron-spell > 0 [
+        if counted? [ set patron-spells lput patron-spell patron-spells ]
+        set patron-spell 0
+      ]
+    ]
+  ]
+  if counted? [
+    ;; network size: number of networks, size of the largest and mean size
+    set networks-sum networks-sum + count current-patrons
+    if any? current-patrons [
+      set largest-network-sum largest-network-sum + max [count my-clients] of current-patrons
+      set network-size-sum network-size-sum + mean [count my-clients] of current-patrons
+      set network-years network-years + 1
+    ]
+    ;; crisis: share of the patrons at the time of this year's general disaster
+    ;; still patrons at the end of the year
+    if any? crisis-patrons [
+      set crisis-survival lput ((count crisis-patrons with [ member? self current-patrons ]) / (count crisis-patrons)) crisis-survival
+    ]
+    ;; patron wealth: yearly relative change of the direct herd and of total
+    ;; wealth of the households that were patrons last year and are still now
+    ask current-patrons with [ previous-herd > 0 ] [
+      set herd-change-sum herd-change-sum + abs (herd - previous-herd) / previous-herd
+      set wealth-change-sum wealth-change-sum + abs (wealth - previous-wealth) / previous-wealth
+      set change-count change-count + 1
+    ]
+  ]
+  ask turtles [
+    ifelse member? self current-patrons [
+      set previous-herd herd
+      set previous-wealth wealth
+    ] [
+      set previous-herd 0
+      set previous-wealth 0
+    ]
+  ]
+end
+
+to finish-networks
+  ;; at the end of the run, the networks still active are counted with the
+  ;; years observed
+  ask current-patrons [
+    set patron-spells lput patron-spell patron-spells
+    set open-spells open-spells + 1
+  ]
+end
+
+;; Reporters. Yearly values, for monitors, plots and BehaviorSpace runs
+;; recorded every few years:
+
+to-report households
+  report count turtles
+end
+
+to-report livestock                  ; all the animals
+  report sum [herd] of turtles
+end
+
+to-report gini-wealth                ; economic inequality, on total wealth
+  report gini [wealth] of turtles
+end
+
+to-report gini-herds                 ; for comparison, on the herds kept
+  report gini [herd] of turtles
+end
+
+to-report number-of-networks         ; patrons with active clients
+  report count turtles with [ any? my-clients ]
+end
+
+to-report number-of-clients
+  report count turtles with [ my-patron != nobody ]
+end
+
+to-report largest-network            ; active clients of the largest network
+  let patrons-now turtles with [ any? my-clients ]
+  if not any? patrons-now [ report 0 ]
+  report max [count my-clients] of patrons-now
+end
+
+to-report mean-network-size
+  let patrons-now turtles with [ any? my-clients ]
+  if not any? patrons-now [ report 0 ]
+  report mean [count my-clients] of patrons-now
+end
+
+to-report mean-patron-herd           ; patron wealth: direct herd
+  let patrons-now turtles with [ any? my-clients ]
+  if not any? patrons-now [ report 0 ]
+  report mean [herd] of patrons-now
+end
+
+to-report mean-patron-wealth         ; patron wealth: direct herd plus lent animals
+  let patrons-now turtles with [ any? my-clients ]
+  if not any? patrons-now [ report 0 ]
+  report mean [wealth] of patrons-now
+end
+
+to-report patron-gap-herd            ; richest minus poorest patron, direct herd
+  let patrons-now turtles with [ any? my-clients ]
+  if not any? patrons-now [ report 0 ]
+  report (max [herd] of patrons-now) - (min [herd] of patrons-now)
+end
+
+to-report patron-gap-wealth          ; richest minus poorest patron, total wealth
+  let patrons-now turtles with [ any? my-clients ]
+  if not any? patrons-now [ report 0 ]
+  report (max [wealth] of patrons-now) - (min [wealth] of patrons-now)
+end
+
+to-report patron-records             ; each patron: [who, direct herd, total wealth, clients]
+  report [ (list who herd wealth (count my-clients)) ] of turtles with [ any? my-clients ]
+end
+
+;; Run values: means over the years after the warm-up (in S0 and S0+E, all
+;; years), to be recorded at the end of each run. A value that is not
+;; defined in a run, for example the mean network duration when no
+;; network was observed, is reported as "NA"
+
+to-report mean-gini-wealth
+  report safe-ratio gini-wealth-sum years-measured
+end
+
+to-report mean-gini-herds
+  report safe-ratio gini-herds-sum years-measured
+end
+
+to-report gini-first-500             ; first 500 years after the warm-up
+  report safe-ratio gini-first-sum gini-first-years
+end
+
+to-report gini-last-500              ; last 500 years of the run
+  report safe-ratio gini-last-sum gini-last-years
+end
+
+to-report persistence-25-wealth      ; used in the criteria of the hypotheses
+  report safe-mean retention-wealth
+end
+
+to-report persistence-25-herds
+  report safe-mean retention-herds
+end
+
+to-report persistence-200-wealth     ; comparison with Tamir
+  report safe-mean continuity-wealth
+end
+
+to-report persistence-200-herds
+  report safe-mean continuity-herds
+end
+
+to-report disaster-loss-share        ; share of the herds struck lost, net of replacement
+  report safe-ratio losses herds-struck
+end
+
+to-report recipient-loss-share       ; losses of recipients
+  report safe-ratio recipient-losses recipient-herds-struck
+end
+
+to-report other-loss-share           ; losses of the other households
+  report safe-ratio other-losses other-herds-struck
+end
+
+to-report mean-number-of-networks
+  report safe-ratio networks-sum years-measured
+end
+
+to-report mean-largest-network
+  report safe-ratio largest-network-sum years-measured
+end
+
+to-report mean-network-size-run      ; years with at least one network
+  report safe-ratio network-size-sum network-years
+end
+
+to-report networks-observed          ; networks ended after the warm-up or open at the end
+  report length patron-spells
+end
+
+to-report mean-network-duration      ; includes the networks open at the end
+  report safe-mean patron-spells
+end
+
+to-report share-of-open-networks     ; networks still active at the end
+  report safe-ratio open-spells (length patron-spells)
+end
+
+to-report mean-contract-length
+  report safe-mean contract-lengths
+end
+
+to-report patron-crisis-survival     ; patrons keeping their status in a general disaster
+  report safe-mean crisis-survival
+end
+
+to-report patron-herd-change         ; mean yearly relative change, direct herd
+  report safe-ratio herd-change-sum change-count
+end
+
+to-report patron-wealth-change       ; mean yearly relative change, total wealth
+  report safe-ratio wealth-change-sum change-count
+end
+
+;; Helpers
+
+to-report wealth                     ; turtle reporter: total wealth (no loans here)
+  report herd
+end
+
+to-report my-clients                 ; turtle reporter: the active clients
+  report turtles with [ my-patron = myself ]
+end
+
+to-report richest-tenth-by-wealth
+  report max-n-of (max (list 1 (round (0.1 * count turtles)))) turtles [ wealth ]
+end
+
+to-report richest-tenth-by-herd
+  report max-n-of (max (list 1 (round (0.1 * count turtles)))) turtles [ herd ]
+end
+
+to-report gini [ values ]
+  let n length values
+  let total sum values
+  if n = 0 or total <= 0 [ report 0 ]
+  let sorted-values sort values
+  let weighted 0
+  let i 0
+  repeat n [
+    set weighted weighted + (i + 1) * (item i sorted-values)
+    set i i + 1
+  ]
+  report (2 * weighted) / (n * total) - (n + 1) / n
+end
+
+to-report safe-mean [ values ]       ; "NA" if there is nothing to average
+  report ifelse-value (empty? values) [ "NA" ] [ mean values ]
+end
+
+to-report safe-ratio [ a b ]         ; "NA" if the denominator is 0
+  report ifelse-value (b = 0) [ "NA" ] [ a / b ]
+end
+
+;; -------------------------------------------------------------------- display
+
+to update-display
+  ;; red = patron, sky = client, gray = other household; size grows with the herd
+  ask turtles [
+    set color ifelse-value (member? self current-patrons) [ red ]
+      [ ifelse-value (my-patron != nobody) [ sky ] [ gray ] ]
+    set size 0.5 + (ln (1 + herd)) / 3
+  ]
+end
+]]></code>
+  <widgets>
+    <view x="90" wrappingAllowedX="true" y="10" frameRate="30.0" minPycor="-24" height="574" showTickCounter="true" patchSize="11.633" fontSize="10" wrappingAllowedY="true" width="574" tickCounterLabel="ticks" maxPycor="24" updateMode="0" maxPxcor="24" minPxcor="-24"></view>
+    <button x="10" y="205" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="55" display="Setup">setup
+</button>
+    <monitor x="240" precision="2" y="720" height="60" fontSize="11" width="210" display="Clients in largest Network (this year, %)"><![CDATA[ifelse-value (number-of-clients > 0) [ 100 * largest-network / number-of-clients ] [ "none" ]]]></monitor>
+    <monitor x="85" precision="2" y="720" height="60" fontSize="11" width="150" display="Network Duration (years)">mean-network-duration</monitor>
+    <monitor x="455" precision="2" y="655" height="60" fontSize="11" width="210" display="Largest Network">mean-largest-network</monitor>
+    <monitor x="240" precision="2" y="655" height="60" fontSize="11" width="210" display="Clients per Network">mean-network-size-run</monitor>
+    <monitor x="85" precision="2" y="655" height="60" fontSize="11" width="150" display="Networks per Year">mean-number-of-networks</monitor>
+    <monitor x="455" precision="2" y="590" height="60" fontSize="11" width="210" display="In richest 10% for 200 years">persistence-200-wealth</monitor>
+    <monitor x="240" precision="2" y="590" height="60" fontSize="11" width="210" display="Still in richest 10% after 25 years">persistence-25-wealth</monitor>
+    <monitor x="85" precision="17" y="590" height="60" fontSize="11" width="150" display="Year">ticks</monitor>
+    <button x="10" y="250" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="56" display="Run">run-simulation</button>
+    <plot x="1050" autoPlotX="false" yMax="10.0" autoPlotY="true" y="300" xMin="0.0" height="285" legend="false" xMax="2000.0" yMin="0.0" width="360" yAxis="Number of networks" xAxis="Years" display="Number of Networks">
+      <setup></setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="default" color="-13840069" legend="true">
+        <setup></setup>
+        <update>plot number-of-networks</update>
+      </pen>
+    </plot>
+    <plot x="670" autoPlotX="false" yMax="100.0" autoPlotY="true" yAxis="Number of surviving households" y="10" xMin="0.0" height="285" legend="true" xMax="2000.0" yMin="0.0" width="375" xAxis="Years" display="Households still existing">
+      <setup></setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="Households" color="-16777216" legend="false">
+        <setup></setup>
+        <update>plot households</update>
+      </pen>
+    </plot>
+    <plot x="1050" autoPlotX="false" yMax="100.0" autoPlotY="true" yAxis="% of carrying capacity" y="10" xMin="0.0" height="285" legend="false" xMax="2000.0" yMin="0.0" width="360" xAxis="Years" display="Pasture Saturation">
+      <setup></setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="Pasture Saturation (%)" color="-13345367" legend="true">
+        <setup></setup>
+        <update>with-local-randomness [ plot 100 * livestock / carrying-capacity ]</update>
+      </pen>
+    </plot>
+    <plot x="670" autoPlotX="false" yMax="1.0" autoPlotY="true" yAxis="Gini Coefficient" y="300" xMin="0.0" height="285" legend="true" xMax="2000.0" yMin="0.0" width="375" xAxis="Years" display="Gini Coefficient (total wealth + herds kept)">
+      <setup></setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="Total wealth Gini" color="-2674135" legend="true">
+        <setup></setup>
+        <update>with-local-randomness [ plot gini-wealth ]</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Herds kept Gini" color="-1184463" legend="true">
+        <setup></setup>
+        <update>with-local-randomness [ plot gini-herds ]</update>
+      </pen>
+    </plot>
+    <plot x="670" autoPlotX="false" yMax="10.0" autoPlotY="true" y="590" xMin="0.0" height="285" legend="false" xMax="2000.0" yMin="0.0" width="375" yAxis="Clients per network" xAxis="Years" display="Size of Networks">
+      <setup></setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="default" color="-8630108" legend="true">
+        <setup></setup>
+        <update>with-local-randomness [ plot mean-network-size ]</update>
+      </pen>
+    </plot>
+    <monitor x="455" precision="3" y="720" height="60" fontSize="11" width="210" display="Losses of other households">other-loss-share</monitor>
+    <monitor x="455" precision="3" y="785" height="60" fontSize="11" width="210" display="Losses of recipients">recipient-loss-share</monitor>
+    <monitor x="240" precision="17" y="785" height="60" fontSize="11" width="210" display="External inflow">(word channel ", " (100 * inflow-level) "%")</monitor>
+    <monitor x="1050" precision="3" y="590" height="60" fontSize="11" width="360" display="Mean Gini (total wealth)">mean-gini-wealth</monitor>
+  </widgets>
+  <info><![CDATA[## WHAT IS IT?
+
+Scenario 1+E (S1+E) of the agent-based model for the paper "Capital Conversion, Debt and Interconnectivity: A Formal Approach to Inequality among Nomadic Herders in Ancient Eurasia". Households in need receive animals from a wealthy patron as a gift, and goods from outside the steppe replace the animals they lose in disasters. Tests H4 (interconnectivity), compared with Scenario 1; reference for Scenario 3+E.
+
+## HOW IT WORKS
+
+100 households start with 60 animals each. Every year (one tick), with the default values, the operations below take place in this order, as in Appendix 2 of the paper; within each operation, households act one at a time in random order:
+
+- External goods (`receive-external-goods`): the yearly inflow, `inflow-level` of the carrying capacity in head of livestock, is divided equally among the recipients of the `channel`: the richest 10% of the year by total wealth (`"top"`), the households still present among the quarter drawn at random at the start of the run (`"frontier"`) or all households (`"diffuse"`). The goods are staples, usable only in the year they arrive.
+- Growth (`grow-herds`): herds grow by 10% while the total livestock does not exceed the carrying capacity; households grow one at a time, in random order, as in Shultz and Costopoulos (2019).
+- Disasters (`disasters`): individual disasters (10% per year for each household) and general disasters (10% per year, striking each household with a probability of 40%) halve the herds they strike; a household struck by both loses three quarters. Each household's goods replace its own animals just lost, not those it holds on loan.
+- Loss of status (`check-patrons`): a patron whose herd falls below 500 loses his status and all his clients.
+- Help (`seek-help`): a household below 60 animals asks its patron, if it has one, for the animals it needs to get back to 60. If the patron cannot give them and still keep 500, or if the household has no patron, it looks for one, chosen at random among the households that can. A client that finds one leaves its old patron; one that finds none stays with him, as in Shultz and Costopoulos. No household can become the patron of its own patron. A client can itself become a patron, as in Shultz and Costopoulos.
+- Dissolution (`dissolve`): a household below 2 animals that no patron can help dissolves and is removed from the simulation.
+- Measures (`update-measures`): the measures of the year are recorded.
+
+At the end of every year the code checks its own bookkeeping and stops with an error if something is inconsistent.
+
+## HOW TO USE IT
+
+**Press `Setup` and then `Run`. Results will appear in the monitor widgets progressively while the simulation is running.**
+
+The parameters are global variables of the Code tab, with their default values in `set-parameters`. To change one, type for example `set carrying-capacity 50000` before `setup`, or vary it in BehaviorSpace; `set-defaults` restores all the default values. A parameter equal to 0 is treated as not set: to use 0, set it after `setup` (for example `setup set general-disaster-rate 0`).
+
+The experiments of the paper are saved in BehaviorSpace (Tools > BehaviorSpace), with every parameter set explicitly and 100 repetitions for each combination of values; the seed of each run is recorded in `run-seed`. The run measures exclude the first 300 years (`warm-up`), so that they do not depend on the initial conditions. The metrics are recorded every 100 years and at the end of each run. For speed, untick "Update view" and "Update plots and monitors" when you start an experiment, and choose the table output.
+
+## THINGS TO NOTICE
+
+Yearly values: `households`, `livestock`, `gini-wealth` (Gini of total wealth: animals owned, including those lent out), `gini-herds` (Gini of the herds kept), `number-of-networks`, `largest-network`, `mean-network-size`, `number-of-clients`, `mean-patron-herd`, `mean-patron-wealth`, `patron-gap-herd` and `patron-gap-wealth` (richest minus poorest patron) and `patron-records` (each patron: who, direct herd, total wealth, clients).
+
+Run values: `mean-gini-wealth`, `mean-gini-herds`, `gini-first-500`, `gini-last-500`, `gini-peak` with `gini-peak-year`, `half-gone-year` (-1 if half of the households never disappeared), `dissolved-households`, `persistence-25-wealth` (share of the richest 10% still among them after 25 years), `persistence-200-wealth` (share that remain among them without interruption for 200 years), the same two by herd kept (`persistence-25-herds`, `persistence-200-herds`), `disaster-loss-share`, `mean-number-of-networks`, `mean-largest-network`, `mean-network-size-run`, `networks-observed`, `mean-network-duration` (networks still active at the end counted with the years observed; their share is `share-of-open-networks`), `mean-contract-length`, `returns-to-dependence`, `patron-crisis-survival`, `patron-herd-change`, `patron-wealth-change`, `recipient-loss-share` and `other-loss-share`. A run value that is not defined in a run, for example the mean network duration when no network was observed, is reported as NA; the yearly network values are 0 in a year without patrons.
+
+## CREDITS AND REFERENCES
+
+Based on Shultz, Daniel R., and Andre Costopoulos. 2019. "Modeling Environmental Variability and Network Formation among Pastoral Nomadic Households: Implications for the Rise of the Mongol Empire." PLOS ONE 14 (10): e0223677. https://doi.org/10.1371/journal.pone.0223677
+
+Code repository: https://github.com/ArcheoHacker1501/ABM_Nomadic_Herders_Inequality
+]]></info>
+  <turtleShapes>
+    <shape name="default" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="5"></point>
+        <point x="40" y="250"></point>
+        <point x="150" y="205"></point>
+        <point x="260" y="250"></point>
+      </polygon>
+    </shape>
+    <shape name="airplane" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="0"></point>
+        <point x="135" y="15"></point>
+        <point x="120" y="60"></point>
+        <point x="120" y="105"></point>
+        <point x="15" y="165"></point>
+        <point x="15" y="195"></point>
+        <point x="120" y="180"></point>
+        <point x="135" y="240"></point>
+        <point x="105" y="270"></point>
+        <point x="120" y="285"></point>
+        <point x="150" y="270"></point>
+        <point x="180" y="285"></point>
+        <point x="210" y="270"></point>
+        <point x="165" y="240"></point>
+        <point x="180" y="180"></point>
+        <point x="285" y="195"></point>
+        <point x="285" y="165"></point>
+        <point x="180" y="105"></point>
+        <point x="180" y="60"></point>
+        <point x="165" y="15"></point>
+      </polygon>
+    </shape>
+    <shape name="arrow" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="0"></point>
+        <point x="0" y="150"></point>
+        <point x="105" y="150"></point>
+        <point x="105" y="293"></point>
+        <point x="195" y="293"></point>
+        <point x="195" y="150"></point>
+        <point x="300" y="150"></point>
+      </polygon>
+    </shape>
+    <shape name="box" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="285"></point>
+        <point x="285" y="225"></point>
+        <point x="285" y="75"></point>
+        <point x="150" y="135"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="135"></point>
+        <point x="15" y="75"></point>
+        <point x="150" y="15"></point>
+        <point x="285" y="75"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="15" y="75"></point>
+        <point x="15" y="225"></point>
+        <point x="150" y="285"></point>
+        <point x="150" y="135"></point>
+      </polygon>
+      <line endX="150" startY="285" marked="false" color="255" endY="135" startX="150"></line>
+      <line endX="15" startY="135" marked="false" color="255" endY="75" startX="150"></line>
+      <line endX="285" startY="135" marked="false" color="255" endY="75" startX="150"></line>
+    </shape>
+    <shape name="bug" rotatable="true" editableColorIndex="0">
+      <circle x="96" y="182" marked="true" color="-1920102913" diameter="108" filled="true"></circle>
+      <circle x="110" y="127" marked="true" color="-1920102913" diameter="80" filled="true"></circle>
+      <circle x="110" y="75" marked="true" color="-1920102913" diameter="80" filled="true"></circle>
+      <line endX="80" startY="100" marked="true" color="-1920102913" endY="30" startX="150"></line>
+      <line endX="220" startY="100" marked="true" color="-1920102913" endY="30" startX="150"></line>
+    </shape>
+    <shape name="butterfly" rotatable="true" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="165"></point>
+        <point x="209" y="199"></point>
+        <point x="225" y="225"></point>
+        <point x="225" y="255"></point>
+        <point x="195" y="270"></point>
+        <point x="165" y="255"></point>
+        <point x="150" y="240"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="165"></point>
+        <point x="89" y="198"></point>
+        <point x="75" y="225"></point>
+        <point x="75" y="255"></point>
+        <point x="105" y="270"></point>
+        <point x="135" y="255"></point>
+        <point x="150" y="240"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="139" y="148"></point>
+        <point x="100" y="105"></point>
+        <point x="55" y="90"></point>
+        <point x="25" y="90"></point>
+        <point x="10" y="105"></point>
+        <point x="10" y="135"></point>
+        <point x="25" y="180"></point>
+        <point x="40" y="195"></point>
+        <point x="85" y="194"></point>
+        <point x="139" y="163"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="162" y="150"></point>
+        <point x="200" y="105"></point>
+        <point x="245" y="90"></point>
+        <point x="275" y="90"></point>
+        <point x="290" y="105"></point>
+        <point x="290" y="135"></point>
+        <point x="275" y="180"></point>
+        <point x="260" y="195"></point>
+        <point x="215" y="195"></point>
+        <point x="162" y="165"></point>
+      </polygon>
+      <polygon color="255" filled="true" marked="false">
+        <point x="150" y="255"></point>
+        <point x="135" y="225"></point>
+        <point x="120" y="150"></point>
+        <point x="135" y="120"></point>
+        <point x="150" y="105"></point>
+        <point x="165" y="120"></point>
+        <point x="180" y="150"></point>
+        <point x="165" y="225"></point>
+      </polygon>
+      <circle x="135" y="90" marked="false" color="255" diameter="30" filled="true"></circle>
+      <line endX="195" startY="105" marked="false" color="255" endY="60" startX="150"></line>
+      <line endX="105" startY="105" marked="false" color="255" endY="60" startX="150"></line>
+    </shape>
+    <shape name="car" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="300" y="180"></point>
+        <point x="279" y="164"></point>
+        <point x="261" y="144"></point>
+        <point x="240" y="135"></point>
+        <point x="226" y="132"></point>
+        <point x="213" y="106"></point>
+        <point x="203" y="84"></point>
+        <point x="185" y="63"></point>
+        <point x="159" y="50"></point>
+        <point x="135" y="50"></point>
+        <point x="75" y="60"></point>
+        <point x="0" y="150"></point>
+        <point x="0" y="165"></point>
+        <point x="0" y="225"></point>
+        <point x="300" y="225"></point>
+        <point x="300" y="180"></point>
+      </polygon>
+      <circle x="180" y="180" marked="false" color="255" diameter="90" filled="true"></circle>
+      <circle x="30" y="180" marked="false" color="255" diameter="90" filled="true"></circle>
+      <polygon color="255" filled="true" marked="false">
+        <point x="162" y="80"></point>
+        <point x="132" y="78"></point>
+        <point x="134" y="135"></point>
+        <point x="209" y="135"></point>
+        <point x="194" y="105"></point>
+        <point x="189" y="96"></point>
+        <point x="180" y="89"></point>
+      </polygon>
+      <circle x="47" y="195" marked="true" color="-1920102913" diameter="58" filled="true"></circle>
+      <circle x="195" y="195" marked="true" color="-1920102913" diameter="58" filled="true"></circle>
+    </shape>
+    <shape name="circle" rotatable="false" editableColorIndex="0">
+      <circle x="0" y="0" marked="true" color="-1920102913" diameter="300" filled="true"></circle>
+    </shape>
+    <shape name="circle 2" rotatable="false" editableColorIndex="0">
+      <circle x="0" y="0" marked="true" color="-1920102913" diameter="300" filled="true"></circle>
+      <circle x="30" y="30" marked="false" color="255" diameter="240" filled="true"></circle>
+    </shape>
+    <shape name="cow" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="200" y="193"></point>
+        <point x="197" y="249"></point>
+        <point x="179" y="249"></point>
+        <point x="177" y="196"></point>
+        <point x="166" y="187"></point>
+        <point x="140" y="189"></point>
+        <point x="93" y="191"></point>
+        <point x="78" y="179"></point>
+        <point x="72" y="211"></point>
+        <point x="49" y="209"></point>
+        <point x="48" y="181"></point>
+        <point x="37" y="149"></point>
+        <point x="25" y="120"></point>
+        <point x="25" y="89"></point>
+        <point x="45" y="72"></point>
+        <point x="103" y="84"></point>
+        <point x="179" y="75"></point>
+        <point x="198" y="76"></point>
+        <point x="252" y="64"></point>
+        <point x="272" y="81"></point>
+        <point x="293" y="103"></point>
+        <point x="285" y="121"></point>
+        <point x="255" y="121"></point>
+        <point x="242" y="118"></point>
+        <point x="224" y="167"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="73" y="210"></point>
+        <point x="86" y="251"></point>
+        <point x="62" y="249"></point>
+        <point x="48" y="208"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="25" y="114"></point>
+        <point x="16" y="195"></point>
+        <point x="9" y="204"></point>
+        <point x="23" y="213"></point>
+        <point x="25" y="200"></point>
+        <point x="39" y="123"></point>
+      </polygon>
+    </shape>
+    <shape name="cylinder" rotatable="false" editableColorIndex="0">
+      <circle x="0" y="0" marked="true" color="-1920102913" diameter="300" filled="true"></circle>
+    </shape>
+    <shape name="dot" rotatable="false" editableColorIndex="0">
+      <circle x="90" y="90" marked="true" color="-1920102913" diameter="120" filled="true"></circle>
+    </shape>
+    <shape name="face happy" rotatable="false" editableColorIndex="0">
+      <circle x="8" y="8" marked="true" color="-1920102913" diameter="285" filled="true"></circle>
+      <circle x="60" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <circle x="180" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <polygon color="255" filled="true" marked="false">
+        <point x="150" y="255"></point>
+        <point x="90" y="239"></point>
+        <point x="62" y="213"></point>
+        <point x="47" y="191"></point>
+        <point x="67" y="179"></point>
+        <point x="90" y="203"></point>
+        <point x="109" y="218"></point>
+        <point x="150" y="225"></point>
+        <point x="192" y="218"></point>
+        <point x="210" y="203"></point>
+        <point x="227" y="181"></point>
+        <point x="251" y="194"></point>
+        <point x="236" y="217"></point>
+        <point x="212" y="240"></point>
+      </polygon>
+    </shape>
+    <shape name="face neutral" rotatable="false" editableColorIndex="0">
+      <circle x="8" y="7" marked="true" color="-1920102913" diameter="285" filled="true"></circle>
+      <circle x="60" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <circle x="180" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <rectangle endX="240" startY="195" marked="false" color="255" endY="225" startX="60" filled="true"></rectangle>
+    </shape>
+    <shape name="face sad" rotatable="false" editableColorIndex="0">
+      <circle x="8" y="8" marked="true" color="-1920102913" diameter="285" filled="true"></circle>
+      <circle x="60" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <circle x="180" y="75" marked="false" color="255" diameter="60" filled="true"></circle>
+      <polygon color="255" filled="true" marked="false">
+        <point x="150" y="168"></point>
+        <point x="90" y="184"></point>
+        <point x="62" y="210"></point>
+        <point x="47" y="232"></point>
+        <point x="67" y="244"></point>
+        <point x="90" y="220"></point>
+        <point x="109" y="205"></point>
+        <point x="150" y="198"></point>
+        <point x="192" y="205"></point>
+        <point x="210" y="220"></point>
+        <point x="227" y="242"></point>
+        <point x="251" y="229"></point>
+        <point x="236" y="206"></point>
+        <point x="212" y="183"></point>
+      </polygon>
+    </shape>
+    <shape name="fish" rotatable="false" editableColorIndex="0">
+      <polygon color="-1" filled="true" marked="false">
+        <point x="44" y="131"></point>
+        <point x="21" y="87"></point>
+        <point x="15" y="86"></point>
+        <point x="0" y="120"></point>
+        <point x="15" y="150"></point>
+        <point x="0" y="180"></point>
+        <point x="13" y="214"></point>
+        <point x="20" y="212"></point>
+        <point x="45" y="166"></point>
+      </polygon>
+      <polygon color="-1" filled="true" marked="false">
+        <point x="135" y="195"></point>
+        <point x="119" y="235"></point>
+        <point x="95" y="218"></point>
+        <point x="76" y="210"></point>
+        <point x="46" y="204"></point>
+        <point x="60" y="165"></point>
+      </polygon>
+      <polygon color="-1" filled="true" marked="false">
+        <point x="75" y="45"></point>
+        <point x="83" y="77"></point>
+        <point x="71" y="103"></point>
+        <point x="86" y="114"></point>
+        <point x="166" y="78"></point>
+        <point x="135" y="60"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="30" y="136"></point>
+        <point x="151" y="77"></point>
+        <point x="226" y="81"></point>
+        <point x="280" y="119"></point>
+        <point x="292" y="146"></point>
+        <point x="292" y="160"></point>
+        <point x="287" y="170"></point>
+        <point x="270" y="195"></point>
+        <point x="195" y="210"></point>
+        <point x="151" y="212"></point>
+        <point x="30" y="166"></point>
+      </polygon>
+      <circle x="215" y="106" marked="false" color="255" diameter="30" filled="true"></circle>
+    </shape>
+    <shape name="flag" rotatable="false" editableColorIndex="0">
+      <rectangle endX="75" startY="15" marked="true" color="-1920102913" endY="300" startX="60" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="90" y="150"></point>
+        <point x="270" y="90"></point>
+        <point x="90" y="30"></point>
+      </polygon>
+      <line endX="90" startY="135" marked="true" color="-1920102913" endY="135" startX="75"></line>
+      <line endX="90" startY="45" marked="true" color="-1920102913" endY="45" startX="75"></line>
+    </shape>
+    <shape name="flower" rotatable="false" editableColorIndex="0">
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="135" y="120"></point>
+        <point x="165" y="165"></point>
+        <point x="180" y="210"></point>
+        <point x="180" y="240"></point>
+        <point x="150" y="300"></point>
+        <point x="165" y="300"></point>
+        <point x="195" y="240"></point>
+        <point x="195" y="195"></point>
+        <point x="165" y="135"></point>
+      </polygon>
+      <circle x="85" y="132" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="130" y="147" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="192" y="85" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="85" y="40" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="177" y="40" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="177" y="132" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="70" y="85" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="130" y="25" marked="true" color="-1920102913" diameter="38" filled="true"></circle>
+      <circle x="96" y="51" marked="true" color="-1920102913" diameter="108" filled="true"></circle>
+      <circle x="113" y="68" marked="false" color="255" diameter="74" filled="true"></circle>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="189" y="233"></point>
+        <point x="219" y="188"></point>
+        <point x="249" y="173"></point>
+        <point x="279" y="188"></point>
+        <point x="234" y="218"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="180" y="255"></point>
+        <point x="150" y="210"></point>
+        <point x="105" y="210"></point>
+        <point x="75" y="240"></point>
+        <point x="135" y="240"></point>
+      </polygon>
+    </shape>
+    <shape name="house" rotatable="false" editableColorIndex="0">
+      <rectangle endX="255" startY="120" marked="true" color="-1920102913" endY="285" startX="45" filled="true"></rectangle>
+      <rectangle endX="180" startY="210" marked="false" color="255" endY="285" startX="120" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="15" y="120"></point>
+        <point x="150" y="15"></point>
+        <point x="285" y="120"></point>
+      </polygon>
+      <line endX="270" startY="120" marked="false" color="255" endY="120" startX="30"></line>
+    </shape>
+    <shape name="leaf" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="210"></point>
+        <point x="135" y="195"></point>
+        <point x="120" y="210"></point>
+        <point x="60" y="210"></point>
+        <point x="30" y="195"></point>
+        <point x="60" y="180"></point>
+        <point x="60" y="165"></point>
+        <point x="15" y="135"></point>
+        <point x="30" y="120"></point>
+        <point x="15" y="105"></point>
+        <point x="40" y="104"></point>
+        <point x="45" y="90"></point>
+        <point x="60" y="90"></point>
+        <point x="90" y="105"></point>
+        <point x="105" y="120"></point>
+        <point x="120" y="120"></point>
+        <point x="105" y="60"></point>
+        <point x="120" y="60"></point>
+        <point x="135" y="30"></point>
+        <point x="150" y="15"></point>
+        <point x="165" y="30"></point>
+        <point x="180" y="60"></point>
+        <point x="195" y="60"></point>
+        <point x="180" y="120"></point>
+        <point x="195" y="120"></point>
+        <point x="210" y="105"></point>
+        <point x="240" y="90"></point>
+        <point x="255" y="90"></point>
+        <point x="263" y="104"></point>
+        <point x="285" y="105"></point>
+        <point x="270" y="120"></point>
+        <point x="285" y="135"></point>
+        <point x="240" y="165"></point>
+        <point x="240" y="180"></point>
+        <point x="270" y="195"></point>
+        <point x="240" y="210"></point>
+        <point x="180" y="210"></point>
+        <point x="165" y="195"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="195"></point>
+        <point x="135" y="240"></point>
+        <point x="120" y="255"></point>
+        <point x="105" y="255"></point>
+        <point x="105" y="285"></point>
+        <point x="135" y="285"></point>
+        <point x="165" y="240"></point>
+        <point x="165" y="195"></point>
+      </polygon>
+    </shape>
+    <shape name="line" rotatable="true" editableColorIndex="0">
+      <line endX="150" startY="0" marked="true" color="-1920102913" endY="300" startX="150"></line>
+    </shape>
+    <shape name="line half" rotatable="true" editableColorIndex="0">
+      <line endX="150" startY="0" marked="true" color="-1920102913" endY="150" startX="150"></line>
+    </shape>
+    <shape name="pentagon" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="15"></point>
+        <point x="15" y="120"></point>
+        <point x="60" y="285"></point>
+        <point x="240" y="285"></point>
+        <point x="285" y="120"></point>
+      </polygon>
+    </shape>
+    <shape name="person" rotatable="false" editableColorIndex="0">
+      <circle x="110" y="5" marked="true" color="-1920102913" diameter="80" filled="true"></circle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="105" y="90"></point>
+        <point x="120" y="195"></point>
+        <point x="90" y="285"></point>
+        <point x="105" y="300"></point>
+        <point x="135" y="300"></point>
+        <point x="150" y="225"></point>
+        <point x="165" y="300"></point>
+        <point x="195" y="300"></point>
+        <point x="210" y="285"></point>
+        <point x="180" y="195"></point>
+        <point x="195" y="90"></point>
+      </polygon>
+      <rectangle endX="172" startY="79" marked="true" color="-1920102913" endY="94" startX="127" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="195" y="90"></point>
+        <point x="240" y="150"></point>
+        <point x="225" y="180"></point>
+        <point x="165" y="105"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="105" y="90"></point>
+        <point x="60" y="150"></point>
+        <point x="75" y="180"></point>
+        <point x="135" y="105"></point>
+      </polygon>
+    </shape>
+    <shape name="plant" rotatable="false" editableColorIndex="0">
+      <rectangle endX="165" startY="90" marked="true" color="-1920102913" endY="300" startX="135" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="255"></point>
+        <point x="90" y="210"></point>
+        <point x="45" y="195"></point>
+        <point x="75" y="255"></point>
+        <point x="135" y="285"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="165" y="255"></point>
+        <point x="210" y="210"></point>
+        <point x="255" y="195"></point>
+        <point x="225" y="255"></point>
+        <point x="165" y="285"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="180"></point>
+        <point x="90" y="135"></point>
+        <point x="45" y="120"></point>
+        <point x="75" y="180"></point>
+        <point x="135" y="210"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="165" y="180"></point>
+        <point x="165" y="210"></point>
+        <point x="225" y="180"></point>
+        <point x="255" y="120"></point>
+        <point x="210" y="135"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="105"></point>
+        <point x="90" y="60"></point>
+        <point x="45" y="45"></point>
+        <point x="75" y="105"></point>
+        <point x="135" y="135"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="165" y="105"></point>
+        <point x="165" y="135"></point>
+        <point x="225" y="105"></point>
+        <point x="255" y="45"></point>
+        <point x="210" y="60"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="135" y="90"></point>
+        <point x="120" y="45"></point>
+        <point x="150" y="15"></point>
+        <point x="180" y="45"></point>
+        <point x="165" y="90"></point>
+      </polygon>
+    </shape>
+    <shape name="sheep" rotatable="false" editableColorIndex="15">
+      <circle x="203" y="65" marked="true" color="-1" diameter="88" filled="true"></circle>
+      <circle x="70" y="65" marked="true" color="-1" diameter="162" filled="true"></circle>
+      <circle x="150" y="105" marked="true" color="-1" diameter="120" filled="true"></circle>
+      <polygon color="-1920102913" filled="true" marked="false">
+        <point x="218" y="120"></point>
+        <point x="240" y="165"></point>
+        <point x="255" y="165"></point>
+        <point x="278" y="120"></point>
+      </polygon>
+      <circle x="214" y="72" marked="false" color="-1920102913" diameter="67" filled="true"></circle>
+      <rectangle endX="179" startY="223" marked="true" color="-1" endY="298" startX="164" filled="true"></rectangle>
+      <polygon color="-1" filled="true" marked="true">
+        <point x="45" y="285"></point>
+        <point x="30" y="285"></point>
+        <point x="30" y="240"></point>
+        <point x="15" y="195"></point>
+        <point x="45" y="210"></point>
+      </polygon>
+      <circle x="3" y="83" marked="true" color="-1" diameter="150" filled="true"></circle>
+      <rectangle endX="80" startY="221" marked="true" color="-1" endY="296" startX="65" filled="true"></rectangle>
+      <polygon color="-1" filled="true" marked="true">
+        <point x="195" y="285"></point>
+        <point x="210" y="285"></point>
+        <point x="210" y="240"></point>
+        <point x="240" y="210"></point>
+        <point x="195" y="210"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="false">
+        <point x="276" y="85"></point>
+        <point x="285" y="105"></point>
+        <point x="302" y="99"></point>
+        <point x="294" y="83"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="false">
+        <point x="219" y="85"></point>
+        <point x="210" y="105"></point>
+        <point x="193" y="99"></point>
+        <point x="201" y="83"></point>
+      </polygon>
+    </shape>
+    <shape name="square" rotatable="false" editableColorIndex="0">
+      <rectangle endX="270" startY="30" marked="true" color="-1920102913" endY="270" startX="30" filled="true"></rectangle>
+    </shape>
+    <shape name="square 2" rotatable="false" editableColorIndex="0">
+      <rectangle endX="270" startY="30" marked="true" color="-1920102913" endY="270" startX="30" filled="true"></rectangle>
+      <rectangle endX="240" startY="60" marked="false" color="255" endY="240" startX="60" filled="true"></rectangle>
+    </shape>
+    <shape name="star" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="151" y="1"></point>
+        <point x="185" y="108"></point>
+        <point x="298" y="108"></point>
+        <point x="207" y="175"></point>
+        <point x="242" y="282"></point>
+        <point x="151" y="216"></point>
+        <point x="59" y="282"></point>
+        <point x="94" y="175"></point>
+        <point x="3" y="108"></point>
+        <point x="116" y="108"></point>
+      </polygon>
+    </shape>
+    <shape name="target" rotatable="false" editableColorIndex="0">
+      <circle x="0" y="0" marked="true" color="-1920102913" diameter="300" filled="true"></circle>
+      <circle x="30" y="30" marked="false" color="255" diameter="240" filled="true"></circle>
+      <circle x="60" y="60" marked="true" color="-1920102913" diameter="180" filled="true"></circle>
+      <circle x="90" y="90" marked="false" color="255" diameter="120" filled="true"></circle>
+      <circle x="120" y="120" marked="true" color="-1920102913" diameter="60" filled="true"></circle>
+    </shape>
+    <shape name="tree" rotatable="false" editableColorIndex="0">
+      <circle x="118" y="3" marked="true" color="-1920102913" diameter="94" filled="true"></circle>
+      <rectangle endX="180" startY="195" marked="false" color="-1653716737" endY="300" startX="120" filled="true"></rectangle>
+      <circle x="65" y="21" marked="true" color="-1920102913" diameter="108" filled="true"></circle>
+      <circle x="116" y="41" marked="true" color="-1920102913" diameter="127" filled="true"></circle>
+      <circle x="45" y="90" marked="true" color="-1920102913" diameter="120" filled="true"></circle>
+      <circle x="104" y="74" marked="true" color="-1920102913" diameter="152" filled="true"></circle>
+    </shape>
+    <shape name="triangle" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="30"></point>
+        <point x="15" y="255"></point>
+        <point x="285" y="255"></point>
+      </polygon>
+    </shape>
+    <shape name="triangle 2" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="150" y="30"></point>
+        <point x="15" y="255"></point>
+        <point x="285" y="255"></point>
+      </polygon>
+      <polygon color="255" filled="true" marked="false">
+        <point x="151" y="99"></point>
+        <point x="225" y="223"></point>
+        <point x="75" y="224"></point>
+      </polygon>
+    </shape>
+    <shape name="truck" rotatable="false" editableColorIndex="0">
+      <rectangle endX="195" startY="45" marked="true" color="-1920102913" endY="187" startX="4" filled="true"></rectangle>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="296" y="193"></point>
+        <point x="296" y="150"></point>
+        <point x="259" y="134"></point>
+        <point x="244" y="104"></point>
+        <point x="208" y="104"></point>
+        <point x="207" y="194"></point>
+      </polygon>
+      <rectangle endX="195" startY="60" marked="false" color="-1" endY="105" startX="195" filled="true"></rectangle>
+      <polygon color="255" filled="true" marked="false">
+        <point x="238" y="112"></point>
+        <point x="252" y="141"></point>
+        <point x="219" y="141"></point>
+        <point x="218" y="112"></point>
+      </polygon>
+      <circle x="234" y="174" marked="false" color="255" diameter="42" filled="true"></circle>
+      <rectangle endX="214" startY="185" marked="true" color="-1920102913" endY="194" startX="181" filled="true"></rectangle>
+      <circle x="144" y="174" marked="false" color="255" diameter="42" filled="true"></circle>
+      <circle x="24" y="174" marked="false" color="255" diameter="42" filled="true"></circle>
+      <circle x="24" y="174" marked="true" color="-1920102913" diameter="42" filled="false"></circle>
+      <circle x="144" y="174" marked="true" color="-1920102913" diameter="42" filled="false"></circle>
+      <circle x="234" y="174" marked="true" color="-1920102913" diameter="42" filled="false"></circle>
+    </shape>
+    <shape name="turtle" rotatable="true" editableColorIndex="0">
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="215" y="204"></point>
+        <point x="240" y="233"></point>
+        <point x="246" y="254"></point>
+        <point x="228" y="266"></point>
+        <point x="215" y="252"></point>
+        <point x="193" y="210"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="195" y="90"></point>
+        <point x="225" y="75"></point>
+        <point x="245" y="75"></point>
+        <point x="260" y="89"></point>
+        <point x="269" y="108"></point>
+        <point x="261" y="124"></point>
+        <point x="240" y="105"></point>
+        <point x="225" y="105"></point>
+        <point x="210" y="105"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="105" y="90"></point>
+        <point x="75" y="75"></point>
+        <point x="55" y="75"></point>
+        <point x="40" y="89"></point>
+        <point x="31" y="108"></point>
+        <point x="39" y="124"></point>
+        <point x="60" y="105"></point>
+        <point x="75" y="105"></point>
+        <point x="90" y="105"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="132" y="85"></point>
+        <point x="134" y="64"></point>
+        <point x="107" y="51"></point>
+        <point x="108" y="17"></point>
+        <point x="150" y="2"></point>
+        <point x="192" y="18"></point>
+        <point x="192" y="52"></point>
+        <point x="169" y="65"></point>
+        <point x="172" y="87"></point>
+      </polygon>
+      <polygon color="1504722175" filled="true" marked="false">
+        <point x="85" y="204"></point>
+        <point x="60" y="233"></point>
+        <point x="54" y="254"></point>
+        <point x="72" y="266"></point>
+        <point x="85" y="252"></point>
+        <point x="107" y="210"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="119" y="75"></point>
+        <point x="179" y="75"></point>
+        <point x="209" y="101"></point>
+        <point x="224" y="135"></point>
+        <point x="220" y="225"></point>
+        <point x="175" y="261"></point>
+        <point x="128" y="261"></point>
+        <point x="81" y="224"></point>
+        <point x="74" y="135"></point>
+        <point x="88" y="99"></point>
+      </polygon>
+    </shape>
+    <shape name="wheel" rotatable="false" editableColorIndex="0">
+      <circle x="3" y="3" marked="true" color="-1920102913" diameter="294" filled="true"></circle>
+      <circle x="30" y="30" marked="false" color="255" diameter="240" filled="true"></circle>
+      <line endX="150" startY="285" marked="true" color="-1920102913" endY="15" startX="150"></line>
+      <line endX="285" startY="150" marked="true" color="-1920102913" endY="150" startX="15"></line>
+      <circle x="120" y="120" marked="true" color="-1920102913" diameter="60" filled="true"></circle>
+      <line endX="79" startY="40" marked="true" color="-1920102913" endY="269" startX="216"></line>
+      <line endX="269" startY="84" marked="true" color="-1920102913" endY="221" startX="40"></line>
+      <line endX="269" startY="216" marked="true" color="-1920102913" endY="79" startX="40"></line>
+      <line endX="221" startY="40" marked="true" color="-1920102913" endY="269" startX="84"></line>
+    </shape>
+    <shape name="wolf" rotatable="false" editableColorIndex="0">
+      <polygon color="255" filled="true" marked="false">
+        <point x="253" y="133"></point>
+        <point x="245" y="131"></point>
+        <point x="245" y="133"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="2" y="194"></point>
+        <point x="13" y="197"></point>
+        <point x="30" y="191"></point>
+        <point x="38" y="193"></point>
+        <point x="38" y="205"></point>
+        <point x="20" y="226"></point>
+        <point x="20" y="257"></point>
+        <point x="27" y="265"></point>
+        <point x="38" y="266"></point>
+        <point x="40" y="260"></point>
+        <point x="31" y="253"></point>
+        <point x="31" y="230"></point>
+        <point x="60" y="206"></point>
+        <point x="68" y="198"></point>
+        <point x="75" y="209"></point>
+        <point x="66" y="228"></point>
+        <point x="65" y="243"></point>
+        <point x="82" y="261"></point>
+        <point x="84" y="268"></point>
+        <point x="100" y="267"></point>
+        <point x="103" y="261"></point>
+        <point x="77" y="239"></point>
+        <point x="79" y="231"></point>
+        <point x="100" y="207"></point>
+        <point x="98" y="196"></point>
+        <point x="119" y="201"></point>
+        <point x="143" y="202"></point>
+        <point x="160" y="195"></point>
+        <point x="166" y="210"></point>
+        <point x="172" y="213"></point>
+        <point x="173" y="238"></point>
+        <point x="167" y="251"></point>
+        <point x="160" y="248"></point>
+        <point x="154" y="265"></point>
+        <point x="169" y="264"></point>
+        <point x="178" y="247"></point>
+        <point x="186" y="240"></point>
+        <point x="198" y="260"></point>
+        <point x="200" y="271"></point>
+        <point x="217" y="271"></point>
+        <point x="219" y="262"></point>
+        <point x="207" y="258"></point>
+        <point x="195" y="230"></point>
+        <point x="192" y="198"></point>
+        <point x="210" y="184"></point>
+        <point x="227" y="164"></point>
+        <point x="242" y="144"></point>
+        <point x="259" y="145"></point>
+        <point x="284" y="151"></point>
+        <point x="277" y="141"></point>
+        <point x="293" y="140"></point>
+        <point x="299" y="134"></point>
+        <point x="297" y="127"></point>
+        <point x="273" y="119"></point>
+        <point x="270" y="105"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="-1" y="195"></point>
+        <point x="14" y="180"></point>
+        <point x="36" y="166"></point>
+        <point x="40" y="153"></point>
+        <point x="53" y="140"></point>
+        <point x="82" y="131"></point>
+        <point x="134" y="133"></point>
+        <point x="159" y="126"></point>
+        <point x="188" y="115"></point>
+        <point x="227" y="108"></point>
+        <point x="236" y="102"></point>
+        <point x="238" y="98"></point>
+        <point x="268" y="86"></point>
+        <point x="269" y="92"></point>
+        <point x="281" y="87"></point>
+        <point x="269" y="103"></point>
+        <point x="269" y="113"></point>
+      </polygon>
+    </shape>
+    <shape name="x" rotatable="false" editableColorIndex="0">
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="270" y="75"></point>
+        <point x="225" y="30"></point>
+        <point x="30" y="225"></point>
+        <point x="75" y="270"></point>
+      </polygon>
+      <polygon color="-1920102913" filled="true" marked="true">
+        <point x="30" y="75"></point>
+        <point x="75" y="30"></point>
+        <point x="270" y="225"></point>
+        <point x="225" y="270"></point>
+      </polygon>
+    </shape>
+  </turtleShapes>
+  <linkShapes>
+    <shape name="default" curviness="0.0">
+      <lines>
+        <line x="-0.2" visible="false">
+          <dash value="0.0"></dash>
+          <dash value="1.0"></dash>
+        </line>
+        <line x="0.0" visible="true">
+          <dash value="1.0"></dash>
+          <dash value="0.0"></dash>
+        </line>
+        <line x="0.2" visible="false">
+          <dash value="0.0"></dash>
+          <dash value="1.0"></dash>
+        </line>
+      </lines>
+      <indicator>
+        <shape name="link direction" rotatable="true" editableColorIndex="0">
+          <line endX="90" startY="150" marked="true" color="-1920102913" endY="180" startX="150"></line>
+          <line endX="210" startY="150" marked="true" color="-1920102913" endY="180" startX="150"></line>
+        </shape>
+      </indicator>
+    </shape>
+  </linkShapes>
+  <previewCommands>setup repeat 75 [ go ]</previewCommands>
+  <experiments>
+    <experiment name="Interconnectivity experiment (H4)" repetitions="100" sequentialRunOrder="true" runMetricsEveryStep="false" timeLimit="2000">
+      <setup>setup</setup>
+      <go>go</go>
+      <runMetricsCondition>ticks mod 100 = 0</runMetricsCondition>
+      <metrics>
+        <metric>run-seed</metric>
+        <metric>households</metric>
+        <metric>livestock</metric>
+        <metric>gini-wealth</metric>
+        <metric>gini-herds</metric>
+        <metric>mean-gini-wealth</metric>
+        <metric>mean-gini-herds</metric>
+        <metric>gini-first-500</metric>
+        <metric>gini-last-500</metric>
+        <metric>gini-peak</metric>
+        <metric>gini-peak-year</metric>
+        <metric>half-gone-year</metric>
+        <metric>dissolved-households</metric>
+        <metric>persistence-25-wealth</metric>
+        <metric>persistence-25-herds</metric>
+        <metric>persistence-200-wealth</metric>
+        <metric>persistence-200-herds</metric>
+        <metric>disaster-loss-share</metric>
+        <metric>number-of-networks</metric>
+        <metric>number-of-clients</metric>
+        <metric>largest-network</metric>
+        <metric>mean-network-size</metric>
+        <metric>mean-number-of-networks</metric>
+        <metric>mean-largest-network</metric>
+        <metric>mean-network-size-run</metric>
+        <metric>mean-network-duration</metric>
+        <metric>share-of-open-networks</metric>
+        <metric>mean-contract-length</metric>
+        <metric>returns-to-dependence</metric>
+        <metric>exits-forced-change</metric>
+        <metric>exits-status-loss</metric>
+        <metric>exits-dissolution</metric>
+        <metric>patron-crisis-survival</metric>
+        <metric>patron-herd-change</metric>
+        <metric>patron-wealth-change</metric>
+        <metric>mean-patron-herd</metric>
+        <metric>mean-patron-wealth</metric>
+        <metric>patron-gap-herd</metric>
+        <metric>patron-gap-wealth</metric>
+        <metric>networks-observed</metric>
+        <metric>recipient-loss-share</metric>
+        <metric>other-loss-share</metric>
+      </metrics>
+      <constants>
+        <enumeratedValueSet variable="number-of-households">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="initial-herd">
+          <value value="60"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="carrying-capacity">
+          <value value="25000"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="growth-rate">
+          <value value="0.1"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="individual-disaster-rate">
+          <value value="0.1"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="general-disaster-rate">
+          <value value="0.1"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="general-disaster-hit">
+          <value value="0.4"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="loss-rate">
+          <value value="0.5"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="dissolution-threshold">
+          <value value="2"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="poverty-threshold">
+          <value value="60"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="patron-threshold">
+          <value value="500"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="help-threshold">
+          <value value="500"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="fixed-transfer">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="patron-choice">
+          <value value="&quot;random&quot;"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="max-years">
+          <value value="2000"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="warm-up">
+          <value value="300"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="fixed-seed">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="inflow-level">
+          <value value="0.015"></value>
+          <value value="0.03"></value>
+          <value value="0.06"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="channel">
+          <value value="&quot;top&quot;"></value>
+          <value value="&quot;frontier&quot;"></value>
+          <value value="&quot;diffuse&quot;"></value>
+        </enumeratedValueSet>
+      </constants>
+    </experiment>
+  </experiments>
+</model>
